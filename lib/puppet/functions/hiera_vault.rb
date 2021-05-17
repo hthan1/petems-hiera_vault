@@ -34,6 +34,13 @@ Puppet::Functions.create_function(:hiera_vault) do
 
     if token.to_s.start_with?('/') and File.exist?(token)
       token = File.read(token).strip.chomp
+    elsif token.to_s == "AWS_EC2"
+      signature = `curl http://169.254.169.254/latest/dynamic/instance-identity/pkcs7`
+      iam_role = `curl http://169.254.169.254/latest/meta-data/iam/security-credentials`
+      client_nonce = '3e8ef13e-9888-42d5-a83f-f23754be12b4'
+      data = {role: "#{iam_role}", pkcs7: "#{signature}", nonce: "#{client_nonce}"}
+      vault_token = $vault.logical.write('auth/aws/login', data)
+      token = vault_token.auth.client_token
     end
 
     token
