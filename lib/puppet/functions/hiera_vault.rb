@@ -34,13 +34,23 @@ Puppet::Functions.create_function(:hiera_vault) do
 
     if token.to_s.start_with?('/') and File.exist?(token)
       token = File.read(token).strip.chomp
-    elsif token.to_s == "AWS_EC2"
-      signature = `curl http://169.254.169.254/latest/dynamic/instance-identity/pkcs7`
-      iam_role = `curl http://169.254.169.254/latest/meta-data/iam/security-credentials`
+    end
+
+    token
+  end
+  
+  def vault_token_ec2()
+    token = nil
+
+    begin
+      signature = Net::HTTP.get('169.254.169.254', '/latest/dynamic/instance-identity/pkcs7', 80)
+      iam_role = Net::HTTP.get('169.254.169.254', '/latest/meta-data/iam/security-credentials', 80)
       client_nonce = '3e8ef13e-9888-42d5-a83f-f23754be12b4'
       data = {role: "#{iam_role}", pkcs7: "#{signature}", nonce: "#{client_nonce}"}
       vault_token = $vault.logical.write('auth/aws/login', data)
       token = vault_token.auth.client_token
+    rescue StandardError => e
+      raise Puppet::DataBinding::LookupError, "[hiera-vault] Error getting token using AWS-EC2 authentication" 
     end
 
     token
@@ -73,16 +83,24 @@ Puppet::Functions.create_function(:hiera_vault) do
       end
     end
 
-    if vault_token(options) == 'IGNORE-VAULT'
-      context.explain { "[hiera-vault] token set to IGNORE-VAULT - Quitting early" }
-      return context.not_found
+    token = nil
+    use_aws_ec2_auth = options['use_aws_ec2_auth'] || false
+    if use_aws_ec2_auth
+      context.explain { "[hiera-vault] retrieving token via AWS-EC2 auth" }
+      token = vault_token_ec2()
+    else
+      token = vault_token(options)
+      if token == 'IGNORE-VAULT'
+        context.explain { "[hiera-vault] token set to IGNORE-VAULT - Quitting early" }
+        return context.not_found
+      end
     end
 
-    if vault_token(options).nil?
-      raise ArgumentError, '[hiera-vault] no token set in options and no token in VAULT_TOKEN'
+    if token.nil?
+      raise ArgumentError, '[hiera-vault] no ec2 auth is used, no token set in options and no token in VAULT_TOKEN'
     end
 
-    result = vault_get(key, options, context)
+    result = vault_get(key, options, context, token)
 
     # Allow hiera to look beyond vault if the value is not found
     continue_if_not_found = options['continue_if_not_found'] || false
@@ -95,7 +113,7 @@ Puppet::Functions.create_function(:hiera_vault) do
   end
 
 
-  def vault_get(key, options, context)
+  def vault_get(key, options, context, resolvedToken)
 
     if ! ['string','json',nil].include?(options['default_field_parse'])
       raise ArgumentError, "[hiera-vault] invalid value for default_field_parse: '#{options['default_field_parse']}', should be one of 'string','json'"
@@ -108,7 +126,7 @@ Puppet::Functions.create_function(:hiera_vault) do
     begin
       $vault.configure do |config|
         config.address = options['address'] unless options['address'].nil?
-        config.token = vault_token(options)
+        config.token = resolvedToken
         config.ssl_pem_file = options['ssl_pem_file'] unless options['ssl_pem_file'].nil?
         config.ssl_verify = options['ssl_verify'] unless options['ssl_verify'].nil?
         config.ssl_ca_cert = options['ssl_ca_cert'] if config.respond_to? :ssl_ca_cert

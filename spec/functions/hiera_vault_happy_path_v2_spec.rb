@@ -75,6 +75,8 @@ describe FakeFunction do
             ctx
           end
 
+          before { allow(function).to receive(:vault_token_ec2).and_return(RSpec::VaultServer.token) }
+
           it 'should exit early if ENV VAULT_TOKEN is set to IGNORE-VAULT' do
             ENV['VAULT_TOKEN'] = 'IGNORE-VAULT'
             expect(context).to receive(:not_found)
@@ -94,6 +96,18 @@ describe FakeFunction do
             vault_token_tmpfile.close
             expect { function.lookup_key('test_key', vault_options.merge({'token' => vault_token_tmpfile.path}), context) }.
               to output(/Read secret: test_key/).to_stdout
+          end
+
+          it 'should support AWS EC2 authentication if use_aws_ec2_auth is set to true' do
+            ENV['VAULT_TOKEN'] = 'AWS-EC2'
+            expect { function.lookup_key('test_key', vault_options.merge({'use_aws_ec2_auth' => true}), context) }.
+              to output(/retrieving token via AWS-EC2 auth/).to_stdout
+          end
+
+          it 'should support AWS EC2 authentication if use_aws_ec2_auth is set to true and token value is provided' do
+            ENV['VAULT_TOKEN'] = 'AWS-EC2'
+            expect { function.lookup_key('test_key', vault_options.merge({'use_aws_ec2_auth' => true, 'token' => 'IGNORE-VAULT'}), context) }.
+              to output(/retrieving token via AWS-EC2 auth/).to_stdout
           end
 
         end

@@ -79,8 +79,14 @@ describe FakeFunction do
 
         it 'should error when no token present and no VAULT_TOKEN env set' do
           expect { function.lookup_key('test_key', vault_options.delete('token'), context) }
-            .to raise_error(ArgumentError, '[hiera-vault] no token set in options and no token in VAULT_TOKEN')
+            .to raise_error(ArgumentError, '[hiera-vault] no ec2 auth is used, no token set in options and no token in VAULT_TOKEN')
         end
+
+        it 'should error when use_aws_ec2_auth is set to false and no token is provided' do
+          expect { function.lookup_key('test_key', vault_options.merge({'use_aws_ec2_auth' => false}).delete('token'), context) }
+            .to raise_error(ArgumentError, '[hiera-vault] no ec2 auth is used, no token set in options and no token in VAULT_TOKEN')
+        end
+
       end
 
       context 'when vault is unsealed' do
